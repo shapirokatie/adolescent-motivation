@@ -1,0 +1,841 @@
+---
+title: "October2019_Katie.analysis"
+author: "Katie"
+date: "10/1/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r, message=FALSE, echo=FALSE, error=FALSE, warning=FALSE}
+# Calling relevant libraries
+rm(list=ls())
+library(dplyr)
+library(magrittr)
+library(ggplot2)
+library(grid)
+library(gridExtra)
+library(ggsignif)
+library(tidyr)
+library(lme4)
+library(lmerTest)
+library(yarrr)
+library(colorspace)
+library(psych)
+library(lme4)
+#library(Rmisc)
+#library(car)
+#library(MASS)
+#library(Matrix)
+#library(mgcv)
+#library(plyr)
+#library(reshape2)
+#library(scales)
+#library(stringr)
+library(ez)
+library(pander)
+library(plotrix)
+library(sciplot)
+library(knitr)
+#library(afex)
+source("/Users/katieshapiro/Desktop/Adolescent_LiquidFeedback copy/Analyses/Katie/summarySEwithin2.R")
+```
+
+#Reading in AD data
+```{r}
+ADdata.path<- "/Users/katieshapiro/Desktop/Adolescent_LiquidFeedback copy/Katie_Analysis_May2018/AD/Ad_ConsolidatedRewardData.csv"
+ADout.path <- "/Users/katieshapiro/Desktop/Adolescent_LiquidFeedback copy/Katie_Analysis_May2018/AD/Analysis/"
+ADrunkey.path<-"/Users/katieshapiro/Desktop/Adolescent_LiquidFeedback copy/Katie_Analysis_May2018/AD/Ad_RunKey.csv"
+ADfigure.path<-"/Users/katieshapiro/Desktop/Adolescent_LiquidFeedback copy/Katie_Analysis_May2018/AD/Figures/"
+
+#Reading in Redcap data:
+RCdata.path <- "/Users/katieshapiro/Desktop/Adolescent_LiquidFeedback copy/Katie_Analysis_May2018/AD/RedCap data/201703146AdolescentM_DATA_LABELS_2018-08-05_1808.csv"
+```
+
+#Formatting AD data
+```{r}
+# Reading the data
+ADdata <- read.csv("/Users/katieshapiro/Desktop/Adolescent_LiquidFeedback copy/Katie_Analysis_May2018/AD/Ad_ConsolidatedRewardData.csv",header=TRUE)
+
+ADdata<-read.csv(ADdata.path, header=TRUE) %>% select(-X)
+
+ADrunkey<-read.csv(ADrunkey.path,header=TRUE)
+ADrunkey<-subset(ADrunkey, !ADrunkey$exclude.=="Yes")
+
+#formatting incentive data
+ADdata<-select(ADrunkey, subID, block, liqType, older18, age) %>%
+  inner_join(ADdata, by=c("subID","block")) %>%
+  mutate(subRewarded = (RT<critRT & ACC==1)*1, subError = (ACC==0 & RT>critRT)*1,
+         moneynumber = factor(reward, levels = c("Reward1","Reward2","Reward4"), labels = c(1,2,4)),
+         money = factor(reward, levels = c("Reward1","Reward2","Reward4"), labels = c("$","$$","$$$$")),
+         rewCode = factor(reward, levels=c("Reward1","Reward2","Reward4"), labels=c(-1,0,1)),
+         liqCode = factor(liqType, levels=c("Juice","Neutral","Saltwater"), labels=c(1,0,-1)),
+         blockCode = factor(block, levels=c(6,7,8), labels=c(-1,0,1)),
+         block = factor(block, levels=c(6,7,8), labels=c(1:3)))
+ADdata$rewCode <- as.numeric(levels(ADdata$rewCode)[ADdata$rewCode])
+ADdata$liqCode <- as.numeric(levels(ADdata$liqCode)[ADdata$liqCode])
+ADdata$blockCode <- as.numeric(levels(ADdata$blockCode)[ADdata$blockCode])
+
+# summarized mean for each subject, grouped by condition
+# note that filter(!is.na(subRewarded)) means excluding the people who didnt answer
+ADdata.means = group_by(ADdata, subID, block, liqType, money, age) %>% filter(!is.na(subRewarded)) %>%
+  dplyr::summarise(n=n(), meanRR = mean(subRewarded), meanACC = mean(ACC), meanErr = mean(subError))
+ADdataRT.means = group_by(ADdata, subID, age, block, liqType, money) %>% filter(!is.na(subRewarded), ACC==1) %>% 
+  dplyr::summarise(n=n(), meanRT = mean(RT))
+
+ADdata.means.money = group_by(ADdata, subID, money, age) %>% filter(!is.na(subRewarded)) %>%
+  dplyr::summarise(n=n(), meanRR = mean(subRewarded), meanACC = mean(ACC), meanErr = mean(subError), meanRT=mean(RT))
+ADdata.means.money$group <- "AD"
+
+ADdata.means.liquid = group_by(ADdata, subID, liqType, age, RT) %>% filter(!is.na(subRewarded)) %>%
+  dplyr::summarise(n=n(), meanRR = mean(subRewarded), meanACC = mean(ACC), meanErr = mean(subError), meanRT = mean(RT))
+ADdata.means.liquid$group <- "AD"
+
+# Create data frame where each row pertains to an individual subject
+# note that filter(!is.na(subRewarded)) means taking out the people who didnt answer
+ADsubjectMeans = group_by(ADdata, subID, age) %>% filter(!is.na(subRewarded)) %>%
+  dplyr::summarise(n=n(), meanRR = mean(subRewarded), meanACC = mean(ACC), meanErr = mean(subError))
+ADsubjectMeansRT = group_by(ADdata, subID) %>% filter(!is.na(subRewarded), ACC==1) %>%
+  dplyr::summarise(n=n(), meanRT = mean(RT))
+
+ADsubjectMeans <-data.frame(ADsubjectMeans, ADsubjectMeansRT$meanRT)
+names(ADsubjectMeans)[names(ADsubjectMeans) == "subjectMeansRT.meanRT"] <- "meanRT"
+```
+
+#Additional AD formatting
+```{r}
+ADsaltwaterData <- subset(ADdata, liqType == "Saltwater")
+ADsaltwaterMeans <- group_by(ADsaltwaterData, subID, age) %>% filter(!is.na(subRewarded)) %>%
+    dplyr::summarise(n=n(), meanRR = mean(subRewarded), meanACC = mean(ACC), meanErr = mean(subError))
+
+ADjuiceData <- subset(ADdata, liqType == "Juice")
+ADjuiceMeans <- group_by(ADjuiceData, subID, age) %>% filter(!is.na(subRewarded)) %>%
+    dplyr::summarise(n=n(), meanRR = mean(subRewarded), meanACC = mean(ACC), meanErr = mean(subError))
+  
+ADneutralData <- subset(ADdata, liqType == "Neutral")
+ADneutralMeans <- group_by(ADneutralData, subID, age) %>% filter(!is.na(subRewarded)) %>%
+    dplyr::summarise(n=n(), meanRR = mean(subRewarded), meanACC = mean(ACC), meanErr = mean(subError))
+
+# Data JUST FOR JUICE, just for $ vs. $$$$
+ADjuiceCondition <- ADdata.means[!(ADdata.means$liqType== "Saltwater") & !(ADdata.means$liqType== "Neutral") & !(ADdata.means$money== "$$"),]
+ADjuiceCondition$group <- "AD"
+
+# Data JUST FOR SALTWATER, just for $ vs. $$$$
+ADsaltwaterCondition <- ADdata.means[!(ADdata.means$liqType== "Juice") & !(ADdata.means$liqType== "Neutral") & !(ADdata.means$money== "$$"),]
+ADsaltwaterCondition$group <- "AD"
+
+# Data for JUST $, juice vs. saltwater
+ADoneDScondition <- ADdata.means[!(ADdata.means$money== "$$") & !(ADdata.means$money== "$$$$") & !(ADdata.means$liqType== "Neutral"),] 
+ADoneDScondition$group <- "AD"
+
+# Data for JUST $$, juice vs. saltwater
+ADtwoDScondition <- ADdata.means[!(ADdata.means$money== "$") & !(ADdata.means$money== "$$$$") & !(ADdata.means$liqType== "Neutral"),]
+ADtwoDScondition$group <- "AD"
+
+# Data for JUST $$$$, juice vs. saltwater
+ADfourDScondition <- ADdata.means[!(ADdata.means$money== "$") & !(ADdata.means$money== "$$") & !(ADdata.means$liqType== "Neutral"),]
+ADfourDScondition$group <- "AD"
+
+# summarise incentive data using dummy coded variables 
+ADdata.means0 = group_by(ADdata, age, subID, liqCode, rewCode) %>%
+  filter(!is.na(subRewarded)) %>% 
+  dplyr::summarise(n = n(), meanRR = mean(subRewarded), meanACC = mean(ACC), meanErr = mean(subError)) 
+ADdataRT.means0 = group_by(ADdata, subID, liqCode, rewCode) %>%
+  filter(!is.na(subRewarded), ACC==1) %>% 
+  dplyr::summarise(n = n(), meanRT = mean(RT)) 
+
+# task switching data, switch costs
+ADdata.means.switch = group_by(ADdata, subID, block, liqType, money,taskSwitch) %>% 
+  filter(!is.na(subRewarded), trial!=1) %>%
+  dplyr::summarise(n=n(), meanRR = mean(subRewarded), meanACC = mean(ACC), meanErr = mean(subError))
+ADdataRT.means.switch = group_by(ADdata, subID, block, liqType, money,taskSwitch) %>% 
+  filter(!is.na(subRewarded), ACC==1, trial!=1) %>% 
+  dplyr::summarise(n=n(), meanRT = mean(RT))
+```
+
+
+#Reading in YA data
+```{r}
+YAdata.path <- "/Users/katieshapiro/Desktop/Adolescent_LiquidFeedback copy/YoungAdult_ConsolidatedRewardData.csv"
+YAout.path <- "/Users/katieshapiro/Desktop/Adolescent_LiquidFeedback copy/"
+YArunkey.path<-"/Users/katieshapiro/Desktop/Adolescent_LiquidFeedback copy/Katie_Analysis_May2018/AD/Ya_RunKey.csv"
+```
+
+
+#Formatting YA data
+```{r}
+# Reading the data
+YAdata<- read.csv("/Users/katieshapiro/Desktop/Adolescent_LiquidFeedback copy/YoungAdult_ConsolidatedRewardData.csv", header=TRUE)
+
+YArunkey<-read.csv(YArunkey.path,header=TRUE)
+
+#formatting incentive data
+YAdata<-select(YArunkey, subID, block, liqType, age) %>%
+  inner_join(YAdata, by=c("subID","block")) %>%
+  mutate(subRewarded = (RT<critRT & ACC==1)*1, subError = (ACC==0 & RT>critRT)*1,
+         #moneynumber = factor(reward, levels = c("Reward1","Reward2","Reward4"), labels = c(1,2,4)),
+         reward <- YAdata$reward,
+         moneynumber = factor(reward, levels = c("Reward1","Reward2","Reward4"), labels = c(1,2,4)),
+         money = factor(reward, levels = c("Reward1","Reward2","Reward4"), labels = c("$","$$","$$$$")),
+         rewCode = factor(reward, levels=c("Reward1","Reward2","Reward4"), labels=c(-1,0,1)),
+         liqCode = factor(liqType, levels=c("juice","neutral","saltwater"), labels=c(1,0,-1)),
+         blockCode = factor(block, levels=c(6,7,8), labels=c(-1,0,1)),
+         block = factor(block, levels=c(7:9), labels=c(1:3)))
+YAdata$rewCode <- as.numeric(levels(YAdata$rewCode)[YAdata$rewCode])
+YAdata$liqCode <- as.numeric(levels(YAdata$liqCode)[YAdata$liqCode])
+
+# summarized mean for each subject, grouped by condition
+YAdata.means = group_by(YAdata, subID, block, liqType, money, age) %>% filter(!is.na(subRewarded)) %>%
+  dplyr::summarise(n=n(), meanRR = mean(subRewarded), meanACC = mean(ACC), meanErr = mean(subError))
+YAdataRT.means = group_by(YAdata, subID, block, liqType, money) %>% filter(!is.na(subRewarded), ACC==1) %>% 
+  dplyr::summarise(n=n(), meanRT = mean(RT))
+
+########
+YAsubjectMeans = group_by(YAdata, subID, age) %>% filter(!is.na(subRewarded)) %>%
+  dplyr::summarise(n=n(), meanRR = mean(subRewarded), meanACC = mean(ACC), meanErr = mean(subError))
+YAsubjectMeansRT = group_by(YAdata, subID) %>% filter(!is.na(subRewarded), ACC==1) %>%
+  dplyr::summarise(n=n(), meanRT = mean(RT))
+
+YAsubjectMeans <-data.frame(YAsubjectMeans, YAsubjectMeansRT$meanRT)
+names(YAsubjectMeans)[names(YAsubjectMeans) == "YAsubjectMeansRT.meanRT"] <- "meanRT"
+
+YAdata.means.money = group_by(YAdata, subID, money, age) %>% filter(!is.na(subRewarded)) %>%
+  dplyr::summarise(n=n(), meanRR = mean(subRewarded), meanACC = mean(ACC), meanErr = mean(subError))
+
+YAdata.means.liquid = group_by(YAdata, subID, liqType, age) %>% filter(!is.na(subRewarded)) %>%
+  dplyr::summarise(n=n(), meanRR = mean(subRewarded), meanACC = mean(ACC), meanErr = mean(subError))
+```
+
+
+# Additional YA formatting
+```{r}
+# Data JUST FOR JUICE, just for $ vs. $$$$
+YAjuiceCondition <- YAdata.means[!(YAdata.means$liqType== "Saltwater") & !(YAdata.means$liqType== "Neutral") & !(YAdata.means$money== "$$"),]
+YAjuiceCondition$group <- "YA"
+
+# Data JUST FOR SALTWATER, just for $ vs. $$$$
+YAsaltwaterCondition <- YAdata.means[!(YAdata.means$liqType== "Juice") & !(YAdata.means$liqType== "Neutral") & !(YAdata.means$money== "$$"),]
+YAsaltwaterCondition$group <- "YA"
+
+# Data for JUST $, juice vs. saltwater
+YAoneDScondition <- YAdata.means[!(YAdata.means$money== "$$") & !(YAdata.means$money== "$$$$") & !(YAdata.means$liqType== "Neutral"),] 
+YAoneDScondition$group <- "YA"
+
+# Data for JUST $$, juice vs. saltwater
+YAtwoDScondition <- YAdata.means[!(YAdata.means$money== "$") & !(YAdata.means$money== "$$$$") & !(YAdata.means$liqType== "Neutral"),]
+YAtwoDScondition$group <- "YA"
+
+# Data for JUST $$$$, juice vs. saltwater
+YAfourDScondition <- YAdata.means[!(YAdata.means$money== "$") & !(YAdata.means$money== "$$") & !(YAdata.means$liqType== "Neutral"),]
+YAfourDScondition$group <- "YA"
+
+# summarise incentive data using dummy coded variables 
+YAdata.means0 = group_by(YAdata, subID, liqCode, rewCode) %>%
+  filter(!is.na(subRewarded)) %>% 
+  dplyr::summarise(n = n(), meanRR = mean(subRewarded), meanACC = mean(ACC), meanErr = mean(subError)) 
+YAdataRT.means0 = group_by(YAdata, subID, liqCode, rewCode) %>%
+  filter(!is.na(subRewarded), ACC==1) %>% 
+  dplyr::summarise(n = n(), meanRT = mean(RT)) 
+
+# task switching data, switch costs
+YAdata.means.switch = group_by(YAdata, subID, block, liqType, money,taskSwitch) %>% 
+  filter(!is.na(subRewarded), trial!=1) %>%
+  dplyr::summarise(n=n(), meanRR = mean(subRewarded), meanACC = mean(ACC), meanErr = mean(subError))
+YAdataRT.means.switch = group_by(YAdata, subID, block, liqType, money,taskSwitch) %>% 
+  filter(!is.na(subRewarded), ACC==1, trial!=1) %>% 
+  dplyr::summarise(n=n(), meanRT = mean(RT))
+```
+
+#Read in / Format AD baseline data
+```{r}
+BLdata.path<- "/Users/katieshapiro/Desktop/Adolescent_LiquidFeedback copy/Katie_Analysis_May2018/AD/Ad_ConsolidatedBaselineData.csv"
+BLout.path <- "/Users/katieshapiro/Desktop/Adolescent_LiquidFeedback copy/Katie_Analysis_May2018/AD/"
+
+BLdata <- read.csv("/Users/katieshapiro/Desktop/Adolescent_LiquidFeedback copy/Katie_Analysis_May2018/AD/Ad_ConsolidatedBaselineData.csv", header=TRUE)
+
+BLdata.means = group_by(BLdata, baseline2.Subject, baseline2.Block) %>%
+  dplyr::summarise(n=n(), meanACC = mean(baseline2.Target.ACC), meanRT = mean(baseline2.Target.RT))
+
+runkeySummary = group_by(ADrunkey, subID, age,) %>%
+  dplyr::summarise(n=n(), critRT = mean(critRT))
+
+#tack on the runkeySummary, which has age, onto BLdata.means
+newBLdata <- cbind(BLdata.means, runkeySummary)
+newBLdata$n <- NULL
+newBLdata$subID1 <- NULL
+newBLdata$n1 <- NULL
+
+colnames(newBLdata)[colnames(newBLdata)=="baseline2.Subject"] <- "subID"
+colnames(newBLdata)[colnames(newBLdata)=="baseline2.Block"] <- "block"
+
+data.base<-read.csv(BLdata.path, header = TRUE)
+colnames(data.base)[colnames(data.base)=="baseline2.Subject"] <- "subID"
+colnames(data.base)[colnames(data.base)=="baseline2.CriterionResult"] <- "crit"
+colnames(data.base)[colnames(data.base)=="baseline2.Block"] <- "block"
+colnames(data.base)[colnames(data.base)=="baseline2.Trial"] <- "trial"
+colnames(data.base)[colnames(data.base)=="baseline2.Subject"] <- "subID"
+colnames(data.base)[colnames(data.base)=="baseline2.Congruency"] <- "congruency"
+colnames(data.base)[colnames(data.base)=="baseline2.Target.ACC"] <- "ACC"
+colnames(data.base)[colnames(data.base)=="baseline2.Target.RESP"] <- "RESP"
+colnames(data.base)[colnames(data.base)=="baseline2.Target.RT"] <- "RT"
+colnames(data.base)[colnames(data.base)=="baseline2.TaskSwitch"] <- "task switch"
+
+# Merge baseline and incentive data
+cond.RT.base <- data.base %>% filter(ACC==1) %>% select(subID, RT)
+cond.RT.base = group_by(cond.RT.base, subID) %>%
+  dplyr::summarise(n=n(), meanRT = mean(RT))
+cond.RT.base$condition = "baseline"
+cond.RT.base$n = NULL 
+cond.RT.base$age = runkeySummary$age
+cond.RT.base$group = c("ages 13-15", "ages 16-18", "ages 16-18", "ages 13-15", "ages 13-15", "ages 13-15", "ages 13-15", "ages 16-18", "ages 16-18", "ages 13-15", "ages 13-15", "ages 16-18", "ages 16-18", "ages 13-15", "ages 16-18", "ages 13-15", "ages 16-18", "ages 16-18", "ages 16-18", "ages 13-15", "ages 13-15", "ages 13-15", "ages 16-18", "ages 16-18", "ages 16-18", "ages 16-18", "ages 16-18", "ages 16-18", "ages 16-18", "ages 13-15", "ages 13-15", "ages 13-15", "ages 13-15", "ages 13-15", "ages 13-15", "ages 16-18", "ages 13-15", "ages 16-18", "ages 16-18", "ages 16-18", "ages 13-15", "ages 13-15", "ages 16-18", "ages 16-18", "ages 13-15", "ages 13-15", "ages 16-18", "ages 13-15", "ages 13-15", "ages 13-15", "ages 16-18")
+
+#dataRT.means already subsetted so ACC==1
+cond.RT.rew <- ADdataRT.means %>% select(subID, meanRT)
+cond.RT.rew = group_by(cond.RT.rew, subID) %>% 
+  dplyr::summarise(n=n(), meanRT = mean(meanRT))
+cond.RT.rew$condition = "reward"
+cond.RT.rew$n = NULL 
+cond.RT.rew$age = runkeySummary$age
+cond.RT.rew$group = c("ages 13-15", "ages 16-18", "ages 16-18", "ages 13-15", "ages 13-15", "ages 13-15", "ages 13-15", "ages 16-18", "ages 16-18", "ages 13-15", "ages 13-15", "ages 16-18", "ages 16-18", "ages 13-15", "ages 16-18", "ages 13-15", "ages 16-18", "ages 16-18", "ages 16-18", "ages 13-15", "ages 13-15", "ages 13-15", "ages 16-18", "ages 16-18", "ages 16-18", "ages 16-18", "ages 16-18", "ages 16-18", "ages 16-18", "ages 13-15", "ages 13-15", "ages 13-15", "ages 13-15", "ages 13-15", "ages 13-15", "ages 16-18", "ages 13-15", "ages 16-18", "ages 16-18", "ages 16-18", "ages 13-15", "ages 13-15", "ages 16-18", "ages 16-18", "ages 13-15", "ages 13-15", "ages 16-18", "ages 13-15", "ages 13-15", "ages 13-15", "ages 16-18")
+
+cond.RT<-rbind(cond.RT.base,cond.RT.rew) 
+
+
+
+# Merge baseline and incentive data
+cond.ACC.base <- data.base  %>% select(subID, ACC)
+cond.ACC.base = group_by(cond.ACC.base, subID) %>%
+  dplyr::summarise(n=n(), meanACC = mean(ACC))
+cond.ACC.base$condition = "baseline"
+cond.ACC.base$n = NULL 
+
+cond.ACC.rew <- ADdata.means %>% select(subID, meanACC)
+cond.ACC.rew = group_by(cond.ACC.rew, subID) %>% 
+  dplyr::summarise(n=n(), meanACC = mean(meanACC))
+cond.ACC.rew$condition = "reward"
+cond.ACC.rew$n = NULL 
+
+cond.ACC<-rbind(cond.ACC.base,cond.ACC.rew)
+```
+
+#Read in AD redcap data
+```{r}
+RCdata.path <- "/Users/katieshapiro/Desktop/Adolescent_LiquidFeedback copy/Katie_Analysis_May2018/AD/RedCap data/201703146AdolescentM_DATA_LABELS_2018-08-05_1808.csv"
+
+RCout.path <- "/Users/katieshapiro/Desktop/Adolescent_LiquidFeedback copy/Katie_Analysis_May2018/AD/RedCap data/"
+```
+
+
+#Format AD redcap data
+```{r}
+RCdata <- read.csv("/Users/katieshapiro/Desktop/Adolescent_LiquidFeedback copy/Katie_Analysis_May2018/AD/RedCap data/201703146AdolescentM_DATA_LABELS_2018-08-05_1808.csv", header=TRUE)
+
+#1 - like/dislike JUICE
+#2 - intensity JUICE
+#3 - like/dislike SALTWATER
+#4 - intensity SALTWATER
+#5 - like/dislike NEUTRAL
+#6 - intensity NEUTRAL
+
+#X - BAS Drive
+#X.1 - BAS FUN
+#X.2 - BAS Reward
+#X.3 - BIS
+
+#SubjData <- select(RCdata, Study.ID, BAS.Drive, BAS.Fun, BAS.Reward, BIS)
+SubjData <- select(RCdata, Study.ID, X, X.1, X.2, X.3, X1.7.liking.JUICE, X1.7.intensity.JUICE, X1.7.liking.SALTWATER, X1.7.intensity.SALTWATER, X1.7.liking.NEUTRAL, X1.7.intensity.NEUTRAL, Mot.1DS.JUICE, Like.1DS.JUICE, Mot.1DS.SALTWATER, Like.1DS.SALTWATER, Mot.1DS.NEUTRAL, Like.1DS.NEUTRAL, Mot.2DS.JUICE, Like.2DS.JUICE, Mot.2DS.SALTWATER, Like.2DS.SALTWATER, Mot.2DS.NEUTRAL, Like.2DS.NEUTRAL, Mot.4DS.JUICE, Like.4DS.JUICE, Mot.4DS.SALTWATER, Like.4DS.SALTWATER, Mot.4DS.NEUTRAL, Like.4DS.NEUTRAL)
+
+SubjData <- SubjData[-40,]
+
+colnames(SubjData)[colnames(SubjData)=="X"] <- "BASDrive"
+colnames(SubjData)[colnames(SubjData)=="X.1"] <- "BASFUN"
+colnames(SubjData)[colnames(SubjData)=="X.2"] <- "BASReward"
+colnames(SubjData)[colnames(SubjData)=="X.3"] <- "BIS"
+colnames(SubjData)[colnames(SubjData)=="X1.7.liking.JUICE"] <- "Juice Likert"
+colnames(SubjData)[colnames(SubjData)=="X1.7.intensity.JUICE"] <- "Juice Intensity"
+colnames(SubjData)[colnames(SubjData)=="X1.7.liking.SALTWATER"] <- "Saltwater Likert"
+colnames(SubjData)[colnames(SubjData)=="X1.7.intensity.SALTWATER"] <- "Saltwater Intensity"
+colnames(SubjData)[colnames(SubjData)=="X1.7.liking.NEUTRAL"] <- "Neutral Likert"
+colnames(SubjData)[colnames(SubjData)=="X1.7.intensity.NEUTRAL"] <- "Neutral Intensity"
+```
+
+
+
+# PLOT I. (TB): BASELINE VS. INCENTIVE EFFECTS 
+
+#All adolescents - with data points plotted
+```{r}
+RT.sum=summarySEwithin2(data=cond.RT, measurevar = "meanRT", withinvars = c("condition"),
+                        idvar = "subID")
+p1a<-ggplot(data = RT.sum, mapping =aes(x=condition, y = meanRT)) +
+  geom_bar(stat = "identity", color="black") +
+  geom_errorbar(aes(ymin=meanRT-ci, ymax=meanRT+ci), width=0.2) +
+  geom_point(data = cond.RT, color="red",
+             position = position_jitter(h=0, w=0.2), alpha=0.75) +
+  xlab("Condition") + ylab("Response Time (ms)") +
+  labs(fill = "Block") +
+  ggtitle("Use theme(plot.title=element_text(hjust=0.5) to center") + theme(plot.title=element_text(hjust=0.5)) +
+   ggtitle("Adolescents' Response Time in Baseline vs. Incentive Trials") +
+  coord_cartesian(ylim=c(0,1500)) +
+  scale_fill_brewer(palette="Set1") +
+  theme(#plot.title=element_text(size=22,face="bold", vjust=2),
+    axis.title=element_text(size=12,face = "bold"),
+    axis.text=element_text(size=14),
+    legend.position=c(.85,.85),
+    legend.box.background = element_rect(colour = "black"),
+    strip.text.x = element_text(size = 12))
+p1a
+```
+
+#All adolescents - without data points plotted
+```{r}
+RT.sum=summarySEwithin2(data=cond.RT, measurevar = "meanRT", withinvars = c("condition"),
+                        idvar = "subID")
+p1a<-ggplot(data = RT.sum, aes(x=condition, y = meanRT)) +
+  geom_bar(position=position_dodge(width=0.8), color="black",
+           stat="identity", width=0.8, fill = "red") +
+  geom_errorbar(position=position_dodge(width=0.8),
+                aes(ymin=meanRT-se, ymax=meanRT+se), width=.2) +
+  xlab("Condition") + ylab("Response Time (ms)") +
+  labs(fill = "Block") +
+  ggtitle("Use theme(plot.title=element_text(hjust=0.5) to center") + theme(plot.title=element_text(hjust=0.5)) +
+   ggtitle("Adolescents' Response Time in Baseline vs. Incentive Trials") +
+  coord_cartesian(ylim=c(400,1000)) +
+  scale_fill_brewer(palette="Set1") +
+  theme(#plot.title=element_text(size=22,face="bold", vjust=2),
+    axis.title=element_text(size=12,face = "bold"),
+    axis.text=element_text(size=14),
+    legend.position=c(.85,.85),
+    legend.box.background = element_rect(colour = "black"),
+    strip.text.x = element_text(size = 12))
+p1a
+```
+
+```{r}
+ezANOVA(data=cond.RT, dv=meanRT, wid=subID, within=condition)
+```
+
+```{r}
+kable(RT.sum, caption = "RT by condition")
+```
+
+
+# Adolescents 13-15 vs. 16-18 years old (baseline vs. incentive)
+```{r}
+RT.sum=summarySEwithin2(data=cond.RT, measurevar = "meanRT", withinvars = c("group", "condition"), idvar = "subID")
+p1b<-ggplot(data = RT.sum, aes(x=condition, y=meanRT, fill="group")) +
+  geom_bar(position=position_dodge(width=0.8), color="black",
+           stat="identity", width=0.8, fill = "red") +
+  geom_errorbar(position=position_dodge(width=0.8),
+                aes(ymin=meanRT-se, ymax=meanRT+se), width=.2) +
+  xlab("Condition") + ylab("Response Time (ms)") +
+  labs(fill = "Block") +
+  ggtitle("Use theme(plot.title=element_text(hjust=0.5) to center") + theme(plot.title=element_text(hjust=0.5)) +
+   ggtitle("Adolescents' Response Time in Baseline vs. Incentive Trials") +
+  coord_cartesian(ylim=c(400,1000)) +
+  scale_fill_brewer(palette="Set1") +
+  theme(#plot.title=element_text(size=22,face="bold", vjust=2),
+    axis.title=element_text(size=12,face = "bold"),
+    axis.text=element_text(size=14),
+    legend.position=c(.85,.85),
+    legend.box.background = element_rect(colour = "black"),
+    strip.text.x = element_text(size = 12))
+p1b
+```
+
+#fix graph ^
+#add stats
+#get young adult baseline data for comparison
+
+
+# PLOT II. (TB): REWARD RATE
+
+#Adolescent reward rate (each age)
+```{r}
+RR.agebin=summarySEwithin2(data = ADdata.means, measurevar = "meanRR", withinvars = "age", idvar = "subID")
+p2a<-ggplot(RR.agebin, aes(x=age, y=meanRR)) + 
+  geom_bar(position=position_dodge(width=0.8),  stat="identity", width=0.8, fill="green") +
+  geom_errorbar(position=position_dodge(width=0.8), aes(ymin=meanRR-se, ymax=meanRR+se), width=.2) +  
+  labs(x="Age Bin",y="Reward Rate") +
+  ggtitle("Use theme(plot.title=element_text(hjust=0.5) to center") + theme(plot.title=element_text(hjust=0.5)) +
+  ggtitle("Adolescent Task Performance by Age Bin") + 
+  #scale_x_discrete(labels=c("win","avoid losing")) +
+  coord_cartesian(ylim=c(.2,.8)) +
+  theme(#panel.background = element_blank(), panel.grid.major= element_blank(),
+        panel.grid.minor=element_blank(),
+        plot.title=element_text(size=22,face="bold", vjust=2),
+        axis.title=element_text(size=12,face = "bold"),
+        axis.text=element_text(size=14),
+        legend.position="none")
+
+p2a
+```
+
+#Adolescent reward rate, 13-15 and 16-18 and young adults
+```{r}
+threeRR.agebin=summarySEwithin2(data = combinedRR.agebin, measurevar = "meanRR", withinvars = "age.group", idvar = "age")
+
+threeRR.agebin <- threeRR.agebin[c(3,1,2),]
+
+p2b<-ggplot(threeRR.agebin, aes(x=age.group, y=meanRR)) + 
+  geom_bar(position=position_dodge(width=0.8),  stat="identity", width=0.8, fill="green") +
+  geom_errorbar(position=position_dodge(width=0.8), aes(ymin=meanRR-se, ymax=meanRR+se), width=.2) +  
+  labs(x="Age Bin",y="Reward Rate") +
+  ggtitle("Use theme(plot.title=element_text(hjust=0.5) to center") + theme(plot.title=element_text(hjust=0.5)) +
+  ggtitle("Adolescent - Young Adult Task Performance by Age Bin") + 
+  #scale_x_discrete(labels=c("win","avoid losing")) +
+  coord_cartesian(ylim=c(.2,.8)) +
+  theme(#panel.background = element_blank(), panel.grid.major= element_blank(),
+        panel.grid.minor=element_blank(),
+        plot.title=element_text(size=14,face="bold", vjust=2),
+        axis.title=element_text(size=12,face = "bold"),
+        axis.text=element_text(size=14),
+        legend.position="none")
+
+p2b
+```
+
+#adolescent to young adult continuum 
+```{r}
+ADsubjectMeans <- data.frame(ADsubjectMeans, age.group = "adolescent")
+YAsubjectMeans <- data.frame(YAsubjectMeans, age.group = "young adult")
+
+combined <- rbind(ADsubjectMeans, YAsubjectMeans)
+
+yaRR.agebin <- summarySEwithin2(data = YAdata.means, measurevar = "meanRR", withinvars = "age", idvar = "subID")
+yaRR.agebin$age.group <- "young adult"
+
+adRR.agebin=summarySEwithin2(data = ADdata.means, measurevar = "meanRR", withinvars = "age", idvar = "subID")
+adRR.agebin$age.group <- "adolescent"
+
+combinedRR.agebin <- rbind(adRR.agebin, yaRR.agebin)
+#change "age" in combinedRR.agebin from factor to integer
+combinedRR.agebin$age <- as.numeric(levels(combinedRR.agebin$age))[combinedRR.agebin$age]
+
+
+figure2c <- ggplot(data = combinedRR.agebin, aes(x = age, y=meanRR)) +
+  geom_bar(data=combinedRR.agebin, stat="identity", position = position_dodge(width = 0.8), width = 0.8, color = "black") +
+  geom_errorbar(position=position_dodge(width=0.8), aes(ymin=meanRR-se, ymax=meanRR+se), width=.2) +  
+  geom_point(data=combined, mapping = aes(x=age, y=meanRR, between=age.group), 
+             stat="identity", position=position_jitter(w=.3), alpha=0.5) +
+  geom_hline(yintercept = .30, linetype="dashed") +
+  geom_hline(yintercept = .35) +
+  geom_hline(yintercept = .25) +
+  #annotate("rect", xmin = 0, xmax = 3, ymin = .25, ymax = .35,
+        #alpha = .2) + 
+  labs(x="Age Bin",y="Reward Rate") +
+  facet_grid(.~age.group, scales = "free_x") +
+  #ggtitle("Task Performance Across Money") + 
+  #scale_x_discrete(labels=c("younger","older")) +
+  #scale_x_continuous(breaks=c(12:19), labels=c(13:18),limits=c(13,18)) + 
+  coord_cartesian(ylim=c(0,.8)) +
+  theme(panel.grid.minor=element_line(),
+        plot.title=element_text(size=22,face="bold", vjust=2),
+        axis.title=element_text(size=14,face = "bold"),
+        axis.text=element_text(size=12))
+        #legend.position="none")
+
+figure2c
+```
+
+
+#add stats for the last 3 graphs
+
+
+
+# PLOT III. (TB): INCENTIVE INTEGRATION
+
+#Adolescent incentive integration
+```{r}
+RR.sum=summarySEwithin2(data = ADdata.means, measurevar = "meanRR", withinvars = c("money","liqType"), idvar="subID")
+p3a<-ggplot(RR.sum, aes(x=liqType, y=meanRR, fill=money)) + 
+  geom_bar(position=position_dodge(width=0.8), color="black", stat="identity", width=0.8) +
+  geom_errorbar(position=position_dodge(width=0.8), aes(ymin=meanRR-se, ymax=meanRR+se), width=.2) +  
+  #facet_grid(.~money) +
+  labs(x="Incentive",y="Reward Rate") +
+  #scale_x_discrete(labels=c("win","avoid losing")) +
+  ggtitle("Use theme(plot.title=element_text(hjust=0.5) to center") + theme(plot.title=element_text(hjust=0.5)) +
+  ggtitle("Adolescent Reward Rate Across Incentive Conditions") + 
+  coord_cartesian(ylim=c(.3,.85)) +
+  theme(#panel.background = element_blank(), panel.grid.major= element_blank(),
+        panel.grid.minor=element_blank(),
+        plot.title=element_text(size=18,face="bold", vjust=2),
+        axis.title=element_text(size=12,face = "bold"),
+        axis.text=element_text(size=14),
+        strip.text.x = element_text(size=12, face = "bold"))
+        #legend.position="none")
+
+p3a
+```
+
+
+```{r}
+ezANOVA(data=ADdata.means, dv=meanRR, wid=subID, within=c(liqType, money))
+```
+
+## Generalized Linear Mixed Effects Models: Reward Rate Effects by Monetary Incentive and Liquid Incentive
+```{r}
+#m.RR.moneyxliq<-glmer(formula = subRewarded ~ moneynumber * liqCode + (1+moneynumber|subID),
+#          data = ADdata, family = binomial)
+#summary(m.RR.moneyxliq)
+```
+
+#Adolescent money performance -by age
+```{r}
+p3b <- ggplot(RR.moneyAgebin, aes(x=age, y=meanRR, fill=money))+
+  geom_bar(position=position_dodge(width=0.8), color="black", stat="identity", width=0.8) +
+  #geom_smooth(method='lm') +
+  geom_errorbar(position=position_dodge(width=0.8), aes(ymin=meanRR-se, ymax=meanRR+se), width=.2) +
+  labs(x="Age bin",y="Reward Rate") +
+  ggtitle("Use theme(plot.title=element_text(hjust=0.5) to center") + theme(plot.title=element_text(hjust=0.5)) +
+  ggtitle("Reward Rate per Monetary Condition
+  between Age Bins")
+  #scale_x_discrete(labels=c("win","avoid losing")) +
+  coord_cartesian(ylim= c(0.4,0.8)) +
+  #coord_cartesian(xlim= c(13,18)) +
+  theme(panel.background = element_blank(), panel.grid.major= element_blank(),
+        panel.grid.minor=element_blank(),
+        plot.title=element_text(size=22,face="bold", vjust=2),
+        axis.title=element_text(size=12,face = "bold"),
+        axis.text=element_text(size=14))
+       # scale_color_manual(values = c("AD" = "black", "YA" = "red")))
+        #legend.position="none")
+p3b
+```
+
+```{r}
+ezANOVA(data=ADdata.means.money, dv=meanRR, wid=subID, within=c(money), between=age)
+```
+
+## Generalized Linear Mixed Effects Models: Reward Rate Effects by Monetary Incentive and Age
+```{r}
+# m.RR.moneyxage<-glmer(formula = subRewarded ~ moneynumber * age + (1+moneynumber|subID),
+#           data = ADdata, family = binomial)
+# summary(m.RR.moneyxage)
+```
+
+
+#Adolescent liquid performance -by age
+```{r}
+RR.liquidAgebin=summarySEwithin2(data=ADdata.means.liquid, measurevar = "meanRR", withinvars = c("age", "liqType"), idvar="subID")
+p3c <- ggplot(RR.liquidAgebin, aes(x=age, y=meanRR, fill=liqType))+
+  geom_bar(position=position_dodge(width=0.8), color="black", stat="identity", width=0.8) +
+  #geom_smooth(method='lm') +
+  geom_errorbar(position=position_dodge(width=0.8), aes(ymin=meanRR-se, ymax=meanRR+se), width=.2) +
+  labs(x="Age bin",y="Reward Rate") +
+  ggtitle("Use theme(plot.title=element_text(hjust=0.5) to center") + theme(plot.title=element_text(hjust=0.5)) +
+  ggtitle("Reward Rate per Liquid Condition 
+  between Age Bins") + 
+  #scale_x_discrete(labels=c("win","avoid losing")) +
+  coord_cartesian(ylim= c(0.4,0.8)) +
+  #coord_cartesian(xlim= c(13,18)) +
+  theme(#panel.background = element_blank(), panel.grid.major= element_blank(),
+        panel.grid.minor=element_blank(),
+        plot.title=element_text(size=22,face="bold", vjust=2),
+        axis.title=element_text(size=12,face = "bold"),
+        axis.text=element_text(size=14))
+       # scale_color_manual(values = c("AD" = "black", "YA" = "red")))
+        #legend.position="none")
+p3c
+```
+
+```{r}
+ezANOVA(data=ADdata.means.liquid, dv=meanRR, wid=subID, within=c(liqType), between=age)
+```
+
+## Generalized Linear Mixed Effects Models: Reward Rate Effects by Liquid Incentive and Age
+```{r}
+# m.RR.liqxage<-glmer(formula = subRewarded ~ liqCode * age + (1+liqCode|subID),
+#           data = ADdata, family = binomial)
+# summary(m.RR.liqxage)
+```
+
+
+#13-15, 16-18, and young adult integration
+```{r}
+ADdata.means$agesplit = "adolescent"
+YAdata.means$agesplit = "young adult"
+
+ALLdata.means <- rbind(ADdata.means, YAdata.means)
+
+RR.sumIntegration<-summarySEwithin2(data = ALLdata.means, measurevar = "meanRR", betweenvars = c("age", "agesplit"),
+                        withinvars = c("money","liqType"), idvar = "subID")
+RR.sumIntegration$age.group <- rep(c("13-15", "16-18", "young adult", "young adult"), each=27)
+
+#RR.sumIntegration$agesplit<-factor(RR.sum$age, levels = c("adolescent","young adult"))
+
+RR.sumIntegration2 <- summarySEwithin2(data= RR.sumIntegration, measurevar = "meanRR", betweenvars = c("age.group"), withinvars = c("money", "liqType"), idvar=c("age"))
+
+figure3d <- ggplot(data = RR.sumIntegration2, aes(x = liqType, y = meanRR, fill = money)) +
+  geom_bar(stat="identity", position = position_dodge(width = 0.8), width = 0.8, color = "black") +
+  geom_errorbar(position=position_dodge(width=0.8), aes(ymin=meanRR-se, ymax=meanRR+se), width=.2) +  
+  labs(x="Liquid",y="Reward Rate") +
+      facet_grid(.~age.group, scales = "free_x") +
+  #ggtitle("Task Performance Across Money") + 
+  #scale_x_discrete(labels=c("younger","older")) +
+  #scale_x_continuous(breaks=c(12:19), labels=c(13:18),limits=c(13,18)) + 
+  coord_cartesian(ylim=c(.4,0.9)) +
+  theme(panel.grid.minor=element_blank(),
+        plot.title=element_text(size=22,face="bold", vjust=2),
+        axis.title=element_text(size=14,face = "bold"),
+        axis.text=element_text(size=8))
+        #legend.position="none")
+
+figure3d
+```
+
+
+
+# PLOT IV. (TB): INDIVIDUAL DIFFERENCES
+
+#Adolescent reward rate by BIS
+```{r}
+#take an average reward rate per subject, plot with BIS/BAS
+#use IndDiff
+
+p4a<-ggplot(IndDiff, aes(x=BIS, y=meanRR)) + 
+  geom_point(position=position_dodge(width=0.8)) +
+  geom_smooth(method=lm, color = "red") +
+  #geom_errorbar(position=position_dodge(width=0.8), aes(ymin=meanRR-se, ymax=meanRR+se), width=.2) +  
+  labs(x="BIS Score",y="Average Reward Rate") +
+    #ggtitle("Use theme(plot.title=element_text(hjust=0.5) to center") + theme(plot.title=element_text(hjust=0.5)) +
+  #ggtitle("$ Reward Rate vs. BIS Score") + 
+  #scale_x_discrete(labels=c("win","avoid losing")) +
+  coord_cartesian(xlim=c(10,30)) +
+  coord_cartesian(ylim=c(0,1)) +
+  theme(#panel.background = element_blank(), panel.grid.major= element_blank(),
+        panel.grid.minor=element_blank(),
+        plot.title=element_text(size=18,face="bold", vjust=2),
+        axis.title=element_text(size=12,face = "bold"),
+        axis.text=element_text(size=10))
+        #legend.position="none")
+
+p4a
+```
+
+```{r}
+z <- na.omit(IndDiff)
+x<-z$BIS
+y<-z$meanRR
+
+cor.test(x,y)
+```
+
+
+```{r}
+#BIS scores in $ conditions
+subIDbis <- data.frame(IndDiff$subID, IndDiff$BIS)
+oneDSbis <- subset(ADdata.means.money, ADdata.means.money$money == "$")
+oneDSbis <- oneDSbis[-c(2),]
+oneDSbis$BIS <- subIDbis$IndDiff.BIS
+
+pOneDSbis<-ggplot(oneDSbis, aes(x=BIS, y=meanRR)) + 
+  geom_point(position=position_dodge(width=0.8)) +
+  geom_smooth(method=lm, color = "red") +
+  #geom_errorbar(position=position_dodge(width=0.8), aes(ymin=meanRR-se, ymax=meanRR+se), width=.2) +  
+  labs(x="BIS Score",y="$ Reward Rate") +
+    #ggtitle("Use theme(plot.title=element_text(hjust=0.5) to center") + theme(plot.title=element_text(hjust=0.5)) +
+  #ggtitle("$ Reward Rate vs. BIS Score") + 
+  #scale_x_discrete(labels=c("win","avoid losing")) +
+  coord_cartesian(xlim=c(10,30)) +
+  coord_cartesian(ylim=c(0,1)) +
+  theme(#panel.background = element_blank(), panel.grid.major= element_blank(),
+        panel.grid.minor=element_blank(),
+        plot.title=element_text(size=18,face="bold", vjust=2),
+        axis.title=element_text(size=12,face = "bold"),
+        axis.text=element_text(size=10))
+        #legend.position="none")
+
+#pOneDSbis
+
+#BIS scores in $$ condition
+twoDSbis <- subset(ADdata.means.money, ADdata.means.money$money == "$$")
+twoDSbis <- twoDSbis[-c(2),]
+twoDSbis$BIS <- subIDbis$IndDiff.BIS
+
+
+pTwoDSbis<-ggplot(twoDSbis, aes(x=BIS, y=meanRR)) + 
+  geom_point(position=position_dodge(width=0.8)) +
+  geom_smooth(method=lm, color = "red") +
+  #geom_errorbar(position=position_dodge(width=0.8), aes(ymin=meanRR-se, ymax=meanRR+se), width=.2) +  
+  labs(x="BIS Score",y="$$ Reward Rate") +
+    #ggtitle("Use theme(plot.title=element_text(hjust=0.5) to center") + theme(plot.title=element_text(hjust=0.5)) +
+  #ggtitle("$$ Reward Rate vs. BIS Score") + 
+  #scale_x_discrete(labels=c("win","avoid losing")) +
+  coord_cartesian(xlim=c(10,30)) +
+  coord_cartesian(ylim=c(0,1)) +
+  theme(#panel.background = element_blank(), panel.grid.major= element_blank(),
+        panel.grid.minor=element_blank(),
+        plot.title=element_text(size=18,face="bold", vjust=2),
+        axis.title=element_text(size=12,face = "bold"),
+        axis.text=element_text(size=10))
+        #legend.position="none")
+
+#pTwoDSbis
+
+#BIS scores in $$$$ condition
+fourDSbis <- subset(ADdata.means.money, ADdata.means.money$money == "$$$$")
+fourDSbis <- fourDSbis[-c(2),]
+fourDSbis$BIS <- subIDbis$IndDiff.BIS
+
+
+pFourDSbis<-ggplot(fourDSbis, aes(x=BIS, y=meanRR)) + 
+  geom_point(position=position_dodge(width=0.8)) +
+  geom_smooth(method=lm, color = "red") +
+  #geom_errorbar(position=position_dodge(width=0.8), aes(ymin=meanRR-se, ymax=meanRR+se), width=.2) +  
+  labs(x="BIS Score",y="$$$$ Reward Rate") +
+    #ggtitle("Use theme(plot.title=element_text(hjust=0.5) to center") + theme(plot.title=element_text(hjust=0.5)) +
+  #ggtitle("$$$$ Reward Rate vs. BIS Score") + 
+  #scale_x_discrete(labels=c("win","avoid losing")) +
+  coord_cartesian(xlim=c(10,30)) +
+  coord_cartesian(ylim=c(0,1)) +
+  theme(#panel.background = element_blank(), panel.grid.major= element_blank(),
+        panel.grid.minor=element_blank(),
+        plot.title=element_text(size=18,face="bold", vjust=2),
+        axis.title=element_text(size=12,face = "bold"),
+        axis.text=element_text(size=10))
+        #legend.position="none")
+
+#pFourDSbis
+
+grid.arrange(pOneDSbis,pTwoDSbis,pFourDSbis, ncol=3, nrow=1, top = "BIS scores in $, $$, and $$$$ reward conditions")
+```
+
+#BIS vs. saltwater liking
+```{r}
+IndDiff <- cbind(ADsubjectMeans, SubjData)
+juiceDiff <- cbind(ADjuiceMeans, SubjData)
+saltwaterDiff <- cbind(ADsaltwaterMeans, SubjData)
+neutralDiff <- cbind(ADneutralMeans, SubjData)
+
+#IndDiff <- na.omit(IndDiff)
+colnames(IndDiff)[colnames(IndDiff)=="Juice Likert"] <- "Juice.Likert"
+colnames(IndDiff)[colnames(IndDiff)=="Saltwater Likert"] <- "Saltwater.Likert"
+colnames(IndDiff)[colnames(IndDiff)=="Neutral Likert"] <- "Neutral.Likert"
+
+BISsaltLike <- select(IndDiff, BIS, Saltwater.Likert)
+BISsaltLike <- na.omit(BISsaltLike)
+newID <- c(1:49)
+BISsaltLike <- cbind(BISsaltLike, newID)
+
+BISvSaltLiking<-summarySEwithin2(data = BISsaltLike, measurevar = "Saltwater.Likert", withinvars="BIS", idvar="newID")
+
+p4c<-ggplot(BISvSaltLiking, aes(x=BIS, y=Saltwater.Likert)) + 
+  geom_bar(position=position_dodge(width=0.8), color="black", stat="identity", width=0.8) +
+  #geom_errorbar(position=position_dodge(width=0.8), aes(ymin=meanRR-se, ymax=meanRR+se), width=.2) +  
+  labs(x="BIS score",y="Saltwater Likert Rating") +
+  ggtitle("Saltwater Likert Rating vs. BIS score") + 
+  #scale_x_discrete(labels=c("win","avoid losing")) +
+  coord_cartesian(ylim=c(0.5,4.5)) +
+  theme(panel.background = element_blank(), panel.grid.major= element_blank(),
+        panel.grid.minor=element_blank(),
+        plot.title=element_text(size=18,face="bold", vjust=2),
+        axis.title=element_text(size=12,face = "bold"),
+        axis.text=element_text(size=14))
+       #legend.position="none")
+p4c
+```
+
